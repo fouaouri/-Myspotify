@@ -13,6 +13,10 @@ class MySpotify:
         self.user_encoder = None
         self.song_encoder = None
         self.user_item_matrix = None
+        self.metadata = (
+                self.songs[["song_id", "artist", "title"]]
+                .drop_duplicates()
+            ) if "song_id" in self.songs.columns else None
 
     def _popularity_ranking(self, dataframe, limit):
         """Return the most popular tracks from a dataframe."""
@@ -41,6 +45,47 @@ class MySpotify:
         top_tracks.index += 1
 
         return top_tracks
+
+    def fit_item_model(self):
+        item_matrix = self.user_item_matrix.T
+        
+        self.item_model = NearestNeighbors(
+            metric="cosine",
+            algorithm="brute",
+            n_neighbors=11
+        )
+        self.item_model.fit(item_matrix)
+
+    def recommend_for_track(self, song_id, n_recommendations=10):
+        if song_id not in self.song_encoder.classes_:
+            raise ValueError("Unknown song ID")
+            
+        song_index = self.song_encoder.transform([song_id])[0]
+        item_matrix = self.user_item_matrix.T
+        
+        distances, indices = self.item_model.kneighbors(
+            item_matrix[song_index],
+            n_neighbors=n_recommendations + 1
+        )
+        
+        similar_song_indices = indices[0][1:]
+        similarities = 1 - distances[0][1:]
+        
+        recommended_song_ids = self.song_encoder.inverse_transform(similar_song_indices)
+        
+        recommendations = pd.DataFrame({
+            "song_id": recommended_song_ids,
+            "score": similarities
+        })
+        
+        recommendations = recommendations.merge(
+            self.metadata,
+            on="song_id",
+            how="left"
+        )
+        
+        recommendations.index += 1
+        return recommendations[["song_id", "artist", "title", "score"]].head(n_recommendations)
 
     def top_250(self):
         """Return the 250 most popular tracks."""
